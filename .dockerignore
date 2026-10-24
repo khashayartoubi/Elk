@@ -1,0 +1,10 @@
+.git/
+.env
+.env.*
+!.env.example
+elasticsearch/data/
+kibana/data/
+logs/
+filebeat/
+docker-compose.yml
+*.bak

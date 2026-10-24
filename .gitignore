@@ -1,0 +1,19 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Elasticsearch and Kibana runtime data
+elasticsearch/data/
+kibana/data/
+
+# Host-side log archives
+logs/*
+!logs/.gitkeep
+
+# Local/editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.bak

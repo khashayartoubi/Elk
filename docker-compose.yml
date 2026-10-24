@@ -1,0 +1,162 @@
+services:
+  elasticsearch:
+    image: docker.agahyarai.local/docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+    container_name: elk-elasticsearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      ELASTIC_PASSWORD: "${ELASTIC_PASSWORD:?Set ELASTIC_PASSWORD in .env}"
+      ES_JAVA_OPTS: "-Xms${ES_HEAP} -Xmx${ES_HEAP}"
+    volumes:
+      - ./elasticsearch/data:/usr/share/elasticsearch/data
+    networks:
+      - elk
+    mem_limit: 3g
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "curl -fsS -u elastic:${ELASTIC_PASSWORD:?Set ELASTIC_PASSWORD in .env} http://localhost:9200 >/dev/null || exit 1"
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  setup:
+    image: docker.agahyarai.local/docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+    container_name: elk-setup
+    restart: "no"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      ELASTIC_PASSWORD: "${ELASTIC_PASSWORD:?Set ELASTIC_PASSWORD in .env}"
+      KIBANA_SYSTEM_PASSWORD: "${KIBANA_SYSTEM_PASSWORD:?Set KIBANA_SYSTEM_PASSWORD in .env}"
+      KIBANA_LOGIN_USER: "${KIBANA_LOGIN_USER:?Set KIBANA_LOGIN_USER in .env}"
+      KIBANA_LOGIN_PASSWORD: "${KIBANA_LOGIN_PASSWORD:?Set KIBANA_LOGIN_PASSWORD in .env}"
+      LOG_RETENTION_DAYS: "${LOG_RETENTION_DAYS:-7}"
+    command:
+      - /bin/bash
+      - -ec
+      - |
+        until curl -fsS -u "elastic:${ELASTIC_PASSWORD}" http://elasticsearch:9200 >/dev/null; do sleep 5; done
+        curl -fsS -X POST -u "elastic:${ELASTIC_PASSWORD}" \
+          -H 'Content-Type: application/json' \
+          http://elasticsearch:9200/_security/user/kibana_system/_password \
+          -d "{\"password\":\"${KIBANA_SYSTEM_PASSWORD}\"}"
+        curl -fsS -X POST -u "elastic:${ELASTIC_PASSWORD}" \
+          -H 'Content-Type: application/json' \
+          "http://elasticsearch:9200/_security/user/${KIBANA_LOGIN_USER}" \
+          -d "{\"password\":\"${KIBANA_LOGIN_PASSWORD}\",\"roles\":[\"superuser\"]}"
+        case "${LOG_RETENTION_DAYS}" in
+          *[!0-9]*|'') echo 'LOG_RETENTION_DAYS must be a positive integer' >&2; exit 1 ;;
+          0) echo 'LOG_RETENTION_DAYS must be greater than zero' >&2; exit 1 ;;
+        esac
+        curl -fsS -X PUT -u "elastic:${ELASTIC_PASSWORD}" \
+          -H 'Content-Type: application/json' \
+          http://elasticsearch:9200/_ilm/policy/docker-logs-retention \
+          -d "{\"policy\":{\"phases\":{\"delete\":{\"min_age\":\"${LOG_RETENTION_DAYS}d\",\"actions\":{\"delete\":{}}}}}}"
+        curl -fsS -X PUT -u "elastic:${ELASTIC_PASSWORD}" \
+          -H 'Content-Type: application/json' \
+          http://elasticsearch:9200/_index_template/docker-logs-retention \
+          -d '{"index_patterns":["docker-logs-*"],"template":{"settings":{"index.lifecycle.name":"docker-logs-retention"}}}'
+        curl -fsS -X PUT -u "elastic:${ELASTIC_PASSWORD}" \
+          -H 'Content-Type: application/json' \
+          'http://elasticsearch:9200/docker-logs-*/_settings?expand_wildcards=open,closed&allow_no_indices=true' \
+          -d '{"index":{"lifecycle":{"name":"docker-logs-retention"}}}'
+    networks:
+      - elk
+
+  logstash:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        STACK_VERSION: ${STACK_VERSION}
+    image: elk-logstash:${STACK_VERSION}
+    container_name: elk-logstash
+    restart: unless-stopped
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    environment:
+      ELASTIC_PASSWORD: "${ELASTIC_PASSWORD:?Set ELASTIC_PASSWORD in .env}"
+      LOG_HOST_IP: "${LOG_HOST_IP:?Set LOG_HOST_IP in .env to this Docker host's LAN IP}"
+      LOG_SERVICE_TYPE: "${LOG_SERVICE_TYPE:-nodejs}"
+    volumes:
+      - ./logs:/srv/elk/logs
+    networks:
+      - elk
+    mem_limit: 1g
+
+  log-cleanup:
+    image: elk-logstash:${STACK_VERSION}
+    container_name: elk-log-cleanup
+    restart: unless-stopped
+    depends_on:
+      logstash:
+        condition: service_started
+    environment:
+      LOG_RETENTION_DAYS: "${LOG_RETENTION_DAYS:-7}"
+    entrypoint: []
+    command:
+      - /bin/bash
+      - -ec
+      - |
+        case "$$LOG_RETENTION_DAYS" in
+          *[!0-9]*|'') echo 'LOG_RETENTION_DAYS must be a positive integer' >&2; exit 1 ;;
+          0) echo 'LOG_RETENTION_DAYS must be greater than zero' >&2; exit 1 ;;
+        esac
+        while true; do
+          find /srv/elk/logs -type f -name '*.ndjson' -mtime +"$$LOG_RETENTION_DAYS" -delete
+          sleep 24h
+        done
+    volumes:
+      - ./logs:/srv/elk/logs
+    networks:
+      - elk
+    mem_limit: 128m
+
+  kibana:
+    image: docker.agahyarai.local/docker.elastic.co/kibana/kibana:${STACK_VERSION}
+    container_name: elk-kibana
+    restart: unless-stopped
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: "${KIBANA_SYSTEM_PASSWORD:?Set KIBANA_SYSTEM_PASSWORD in .env}"
+      XPACK_SECURITY_ENABLED: "true"
+    ports:
+      - "${KIBANA_BIND_IP}:${KIBANA_PORT}:5601"
+    volumes:
+      - ./kibana/data:/usr/share/kibana/data
+    networks:
+      - elk
+    mem_limit: 2g
+
+  filebeat:
+    image: docker.agahyarai.local/docker.elastic.co/beats/filebeat:${STACK_VERSION}
+    container_name: elk-filebeat
+    user: root
+    restart: unless-stopped
+    command: ["--strict.perms=false", "-e"]
+    depends_on:
+      - logstash
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - filebeat-data:/usr/share/filebeat/data
+    networks:
+      - elk
+    mem_limit: 512m
+
+networks:
+  elk:
+    name: elk-network
+
+volumes:
+  filebeat-data:
