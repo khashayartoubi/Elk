@@ -1,0 +1,23 @@
+metricbeat.modules:
+  - module: system
+    period: 10s
+    metricsets: [cpu, load, memory, network, filesystem, fsstat]
+    processes: ['.*']
+    filesystem.ignore_types: ['sysfs', 'proc', 'cgroup', 'devtmpfs', 'overlay', 'squashfs']
+
+  # Per-container metrics for the service section of the Kibana dashboard.
+  - module: docker
+    period: 10s
+    hosts: ["unix:///var/run/docker.sock"]
+    metricsets: ["container", "cpu", "memory", "network"]
+
+metricbeat.config.modules:
+  path: ${path.config}/modules.d/*.yml
+  reload.enabled: false
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  username: "elastic"
+  password: "${ELASTIC_PASSWORD}"
+
+system.hostfs: /hostfs

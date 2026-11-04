@@ -73,7 +73,7 @@ services:
       dockerfile: Dockerfile
       args:
         STACK_VERSION: ${STACK_VERSION}
-    image: elk-logstash:${STACK_VERSION}
+    image: docker.agahyarai.local/elk-logstash:${STACK_VERSION}
     container_name: elk-logstash
     restart: unless-stopped
     depends_on:
@@ -136,6 +136,38 @@ services:
     networks:
       - elk
     mem_limit: 2g
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "curl -fsS http://localhost:5601/api/status >/dev/null || exit 1"
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  kibana-provision:
+    image: docker.agahyarai.local/docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+    container_name: elk-kibana-provision
+    restart: unless-stopped
+    depends_on:
+      kibana:
+        condition: service_healthy
+    environment:
+      KIBANA_LOGIN_USER: "${KIBANA_LOGIN_USER:?Set KIBANA_LOGIN_USER in .env}"
+      KIBANA_LOGIN_PASSWORD: "${KIBANA_LOGIN_PASSWORD:?Set KIBANA_LOGIN_PASSWORD in .env}"
+      ELASTIC_PASSWORD: "${ELASTIC_PASSWORD:?Set ELASTIC_PASSWORD in .env}"
+    command:
+      - /bin/bash
+      - -ec
+      - |
+        while true; do
+          /provision/import-dashboard.sh
+          sleep 1h
+        done
+    volumes:
+      - ./provision:/provision:ro
+    networks:
+      - elk
 
   filebeat:
     image: docker.agahyarai.local/docker.elastic.co/beats/filebeat:${STACK_VERSION}
@@ -150,6 +182,31 @@ services:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - filebeat-data:/usr/share/filebeat/data
+    networks:
+      - elk
+    mem_limit: 512m
+
+  metricbeat:
+    image: docker.agahyarai.local/docker.elastic.co/beats/metricbeat:${STACK_VERSION}
+    container_name: elk-metricbeat
+    user: root
+    restart: unless-stopped
+    command: ["--strict.perms=false", "-e"]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kibana:
+        condition: service_healthy
+    environment:
+      ELASTIC_PASSWORD: "${ELASTIC_PASSWORD:?Set ELASTIC_PASSWORD in .env}"
+      KIBANA_LOGIN_USER: "${KIBANA_LOGIN_USER:?Set KIBANA_LOGIN_USER in .env}"
+      KIBANA_LOGIN_PASSWORD: "${KIBANA_LOGIN_PASSWORD:?Set KIBANA_LOGIN_PASSWORD in .env}"
+    volumes:
+      - ./metricbeat/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro
+      - /proc:/hostfs/proc:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /:/hostfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - elk
     mem_limit: 512m
