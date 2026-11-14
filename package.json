@@ -1,0 +1,16 @@
+{
+  "name": "elk",
+  "version": "1.0.0",
+  "description": "یک استک آمادهٔ Docker Compose برای جمع‌آوری، پردازش، جست‌وجو و مشاهدهٔ لاگ کانتینرهای Docker با Elasticsearch، Logstash، Kibana و Filebeat.",
+  "main": "index.js",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "prettier": "^3.9.10"
+  }
+}

@@ -90,7 +90,7 @@ services:
     mem_limit: 1g
 
   log-cleanup:
-    image: elk-logstash:${STACK_VERSION}
+    image: registry.agahyarai.local/elk-logstash:${STACK_VERSION}
     container_name: elk-log-cleanup
     restart: unless-stopped
     depends_on:
@@ -153,6 +153,7 @@ services:
       kibana:
         condition: service_healthy
     environment:
+      STACK_VERSION: "${STACK_VERSION}"
       KIBANA_LOGIN_USER: "${KIBANA_LOGIN_USER:?Set KIBANA_LOGIN_USER in .env}"
       KIBANA_LOGIN_PASSWORD: "${KIBANA_LOGIN_PASSWORD:?Set KIBANA_LOGIN_PASSWORD in .env}"
       ELASTIC_PASSWORD: "${ELASTIC_PASSWORD:?Set ELASTIC_PASSWORD in .env}"
