@@ -90,7 +90,7 @@ services:
     mem_limit: 1g
 
   log-cleanup:
-    image: registry.agahyarai.local/elk-logstash:${STACK_VERSION}
+    image: docker.agahyarai.local/elk-logstash:${STACK_VERSION}
     container_name: elk-log-cleanup
     restart: unless-stopped
     depends_on:

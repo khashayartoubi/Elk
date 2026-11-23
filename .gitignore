@@ -3,7 +3,7 @@
 .env.*
 !.env.example
 
-# Elasticsearch and Kibana runtime data
+# Bind-mounted runtime data (created locally by Docker; never commit)
 elasticsearch/data/
 kibana/data/
 
@@ -17,3 +17,5 @@ logs/*
 .vscode/
 *.swp
 *.bak
+*.ndjson
+node_modules
